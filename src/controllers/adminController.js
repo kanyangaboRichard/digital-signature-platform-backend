@@ -49,6 +49,20 @@ const inviteUsersCsv = asyncHandler(async (req, res) => {
     res.status(200).json({ message: `${results.invited.length} invited, ${results.skipped.length} skipped.`, ...results });
 });
 
+const resendInvite = asyncHandler(async (req, res) => {
+    const { id } = req.params;
+    try {
+        const user = await adminService.resendInvite(id, req.user.email);
+        res.status(200).json({ message: `Invitation resent to ${user.email}.`, user });
+    } catch (error) {
+        if (error.message === 'USER_NOT_FOUND') throw new NotFoundError('User not found.');
+        if (error.message === 'INVITE_ALREADY_ACCEPTED') throw new ValidationError('This user has already accepted their invitation.');
+        if (error.message === 'INVITE_NOT_EXPIRED') throw new ValidationError('The current invitation has not expired yet.');
+        if (error.message === 'USER_DEACTIVATED') throw new ValidationError('Reactivate this user before resending their invitation.');
+        throw error;
+    }
+});
+
 const updateUserRole = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const { role } = req.body;
@@ -68,7 +82,7 @@ const deactivateUser = asyncHandler(async (req, res) => {
     const { id } = req.params;
     const { reason } = req.body;
     try {
-        await adminService.setUserActive(id, false, req.user.userId,reason);
+        await adminService.setUserActive(id, false, req.user.userId, reason);
         res.status(200).json({ message: 'User deactivated.' });
     } catch (error) {
         if (error.message === 'CANNOT_MODIFY_SELF') throw new ValidationError('You cannot deactivate your own account.');
@@ -98,4 +112,4 @@ const getAllFiles = asyncHandler(async (req, res) => {
     res.status(200).json(data);
 });
 
-module.exports = { listUsers, listAuditLogs, inviteUser, inviteUsersCsv, updateUserRole, deactivateUser, reactivateUser, getTurnaroundAudit, getAllFiles };
+module.exports = { listUsers, listAuditLogs, inviteUser, inviteUsersCsv, resendInvite, updateUserRole, deactivateUser, reactivateUser, getTurnaroundAudit, getAllFiles };

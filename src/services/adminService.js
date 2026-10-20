@@ -2,10 +2,14 @@ const { Op } = require('sequelize');
 const { User, AuditLog, Document, Template, WorkflowStep } = require('../models');
 const { sendInvitationEmail, sendAccountDeactivatedEmail, sendAccountReactivatedEmail } = require('../utils/emailManager');
 
+// How long an invitation stays valid. Override with INVITE_TTL_HOURS in .env.
+const INVITE_TTL_HOURS = Number(process.env.INVITE_TTL_HOURS) || 72;
+const newInviteExpiry = () => new Date(Date.now() + INVITE_TTL_HOURS * 60 * 60 * 1000);
+
 class AdminService {
     async listUsers() {
         const users = await User.findAll({
-            attributes: ['id', 'name', 'email', 'role', 'isVerified', 'isActive', 'created_at'],
+            attributes: ['id', 'name', 'email', 'role', 'isVerified', 'isActive', 'inviteExpiresAt', 'created_at'],
             order: [['created_at', 'DESC']]
         });
 
@@ -15,6 +19,8 @@ class AdminService {
             email: u.email,
             role: u.role,
             status: !u.isActive ? 'deactivated' : (u.isVerified ? 'active' : 'invited'),
+            // Only meaningful while the invite is pending; accepted users don't need it
+            inviteExpiresAt: u.isVerified ? null : u.inviteExpiresAt,
             createdAt: u.created_at
         }));
     }
@@ -28,7 +34,7 @@ class AdminService {
         return { id: user.id, name: user.name, email: user.email, role: user.role };
     }
 
-        async setUserActive(userId, isActive, actingAdminId, reason) {
+    async setUserActive(userId, isActive, actingAdminId, reason) {
         if (userId === actingAdminId) throw new Error('CANNOT_MODIFY_SELF');
         const user = await User.findByPk(userId);
         if (!user) throw new Error('USER_NOT_FOUND');
@@ -47,11 +53,15 @@ class AdminService {
 
         return { id: user.id, name: user.name, email: user.email };
     }
+
     async inviteUser(name, email, invitedByEmail) {
         const existing = await User.findOne({ where: { email } });
-        if (existing && existing.passwordHash) {
+        // Already joined (password set, or verified via Google/Microsoft sign-in)
+        if (existing && (existing.passwordHash || existing.isVerified)) {
             throw new Error('USER_ALREADY_ACTIVE');
         }
+
+        const inviteExpiresAt = newInviteExpiry();
 
         let user = existing;
         if (!user) {
@@ -60,14 +70,18 @@ class AdminService {
                 email,
                 role: 'user',
                 isVerified: false,
+                inviteExpiresAt,
             });
+        } else {
+            
+            await user.update({ inviteExpiresAt });
         }
 
         sendInvitationEmail(email, invitedByEmail).catch(err =>
             console.error('Failed to send invitation email:', err)
         );
 
-        return { id: user.id, name: user.name, email: user.email };
+        return { id: user.id, name: user.name, email: user.email, inviteExpiresAt };
     }
 
     async inviteUsersFromCsv(rows, invitedByEmail) {
@@ -83,6 +97,7 @@ class AdminService {
             }
 
             try {
+                // inviteUser sets the expiry, so CSV invites get one too
                 await this.inviteUser(name, email, invitedByEmail);
                 results.invited.push(email);
             } catch (error) {
@@ -91,6 +106,29 @@ class AdminService {
         }
 
         return results;
+    }
+
+   
+    
+    async resendInvite(userId, invitedByEmail) {
+        const user = await User.findByPk(userId);
+        if (!user) throw new Error('USER_NOT_FOUND');
+        if (user.isVerified || user.passwordHash) throw new Error('INVITE_ALREADY_ACCEPTED');
+        if (!user.isActive) throw new Error('USER_DEACTIVATED');
+
+        // A missing expiry (invites sent before this feature) counts as expired
+        if (user.inviteExpiresAt && new Date(user.inviteExpiresAt) > new Date()) {
+            throw new Error('INVITE_NOT_EXPIRED');
+        }
+
+        const inviteExpiresAt = newInviteExpiry();
+        await user.update({ inviteExpiresAt });
+
+        sendInvitationEmail(user.email, invitedByEmail).catch(err =>
+            console.error('Failed to resend invitation email:', err)
+        );
+
+        return { id: user.id, name: user.name, email: user.email, inviteExpiresAt };
     }
 
     async listAuditLogs(filters) {
@@ -147,11 +185,8 @@ class AdminService {
             order: [['document_id', 'ASC'], ['stepOrder', 'ASC']]
         });
 
-        // We need to calculate turnaround for each step.
-        // If stepOrder == 1, startedAt = Document.created_at
-        // If stepOrder > 1, startedAt = signedAt of the previous step in the same document
-        
-        // Let's build a map of document steps to easily find the previous step
+
+        // map of document steps to easily find the previous step
         const docSteps = {};
         for (const step of steps) {
             const docId = step.document_id;
@@ -159,13 +194,13 @@ class AdminService {
             docSteps[docId].push(step);
         }
 
-        const signerStats = {}; // { [email]: { name, totalHours, count } }
+        const signerStats = {}; 
         let totalGlobalHours = 0;
         let globalCount = 0;
 
         for (const step of steps) {
             if (!step.signedAt) continue; // safety check
-            
+
             let startedAt = step.Document.created_at;
             if (step.stepOrder > 1) {
                 // Find previous step
@@ -176,7 +211,7 @@ class AdminService {
             }
 
             const turnaroundMs = new Date(step.signedAt) - new Date(startedAt);
-            if (turnaroundMs < 0) continue; // anomalous data
+            if (turnaroundMs < 0) continue; 
 
             const turnaroundHours = turnaroundMs / (1000 * 60 * 60);
 
@@ -193,7 +228,7 @@ class AdminService {
 
             signerStats[email].totalHours += turnaroundHours;
             signerStats[email].count += 1;
-            
+
             signerStats[email].history.push({
                 fileName: step.Document.fileName || 'Untitled Document',
                 initiatedAt: step.Document.created_at,
