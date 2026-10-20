@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 const multer = require('multer');
 
-const { listUsers, listAuditLogs, inviteUser, inviteUsersCsv, updateUserRole, deactivateUser, reactivateUser, getTurnaroundAudit, getAllFiles } = require('../controllers/adminController');
+const { listUsers, listAuditLogs, inviteUser, inviteUsersCsv, resendInvite, 
+updateUserRole, deactivateUser, reactivateUser, getTurnaroundAudit, getAllFiles } = require('../controllers/adminController');
 const authenticateToken = require('../middleware/authMiddleware');
 const requireAdmin = require('../middleware/requireAdmin');
 
@@ -11,6 +12,7 @@ const upload = multer({ storage: multer.memoryStorage() });
 router.get('/users', authenticateToken, requireAdmin, listUsers);
 router.post('/users/invite', authenticateToken, requireAdmin, inviteUser);
 router.post('/users/invite-csv', authenticateToken, requireAdmin, upload.single('file'), inviteUsersCsv);
+router.post('/users/:id/resend-invite', authenticateToken, requireAdmin, resendInvite);
 router.patch('/users/:id/role', authenticateToken, requireAdmin, updateUserRole);
 router.patch('/users/:id/deactivate', authenticateToken, requireAdmin, deactivateUser);
 router.patch('/users/:id/reactivate', authenticateToken, requireAdmin, reactivateUser);

@@ -49,6 +49,7 @@ const User = sequelize.define('User', {
     verificationToken: DataTypes.STRING,
     resetPasswordToken: DataTypes.STRING,
     resetPasswordExpiresAt: DataTypes.DATE,
+    inviteExpiresAt: DataTypes.DATE,
 }, {
     tableName: 'users',
     underscored: true, 

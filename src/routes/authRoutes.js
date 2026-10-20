@@ -1,19 +1,8 @@
 const express = require('express');
 const router = express.Router();
 
-const { 
-    registerUser, 
-    loginUser, 
-    forgotPassword, 
-    resetPassword,
-    verifyEmail,
-    resendVerification,
-    logoutUser,
-    getUserProfile,
-    checkInvite,
-    completeInvite,
-    searchUsers,
-    updateProfile,
+const { registerUser,loginUser,forgotPassword,resetPassword,verifyEmail,resendVerification,
+    logoutUser,getUserProfile,checkInvite,completeInvite,searchUsers,updateProfile,
     changePassword
 } = require('../controllers/authController');
 
