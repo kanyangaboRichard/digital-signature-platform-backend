@@ -30,6 +30,8 @@ const loginUser = asyncHandler(async (req, res) => {
         res.status(200).json({ message: 'Login successful', user });
     } catch (error) {
         if (error.message === 'INVALID_CREDENTIALS') throw new UnauthorizedError('Invalid email or password');
+        if (error.message === 'INVITE_PENDING') throw new UnauthorizedError("Your account isn't set up yet. Use the link in your invitation email to finish signing up.");
+        if (error.message === 'OAUTH_ACCOUNT') throw new UnauthorizedError('This account uses Google or Microsoft sign-in. Please continue with that option.');
         if (error.message === 'UNVERIFIED_ACCOUNT') {
             const err = new UnauthorizedError('Account not verified. Please check your email.');
             err.requiresVerification = true;
@@ -138,11 +140,11 @@ const completeInvite = asyncHandler(async (req, res) => {
 const searchUsers = asyncHandler(async (req, res) => {
     const { q } = req.query;
     if (!q || q.length < 2) return res.status(200).json({ users: [] });
-    
+
     // We need the User model and Op from Sequelize
     const { User } = require('../models');
     const { Op } = require('sequelize');
-    
+
     const users = await User.findAll({
         where: {
             [Op.or]: [
@@ -153,7 +155,7 @@ const searchUsers = asyncHandler(async (req, res) => {
         attributes: ['id', 'name', 'email'],
         limit: 10
     });
-    
+
     res.status(200).json({ users });
 });
 
@@ -173,7 +175,7 @@ const updateProfile = asyncHandler(async (req, res) => {
 const changePassword = asyncHandler(async (req, res) => {
     const { currentPassword, newPassword } = req.body;
     if (!currentPassword || !newPassword) throw new ValidationError('Current and new password are required.');
-    
+
     // Password validation: new with current password
     if (currentPassword === newPassword) throw new ValidationError('Your new password must be different from your current password.');
 

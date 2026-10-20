@@ -16,9 +16,6 @@ class AuthService {
                 // Fully registered already — real conflict
                 throw new Error('USER_EXISTS');
             }
-
-            // This user was invited by an admin but hasn't completed signup yet.
-            // Complete their account instead of rejecting the registration.
             const salt = await bcrypt.genSalt(10);
             const passwordHash = await bcrypt.hash(password, salt);
             const otpToken = crypto.randomInt(100000, 999999).toString();
@@ -64,6 +61,16 @@ class AuthService {
         const user = await User.findOne({ where: { email } });
         if (!user) throw new Error('INVALID_CREDENTIALS');
 
+        // No password yet: bcrypt.compare would throw on a null hash and surface as a 500.
+        if (!user.passwordHash) {
+            // Signed up with Google / Microsoft — password login isn't available
+            if (user.authProvider && user.authProvider !== 'local') {
+                throw new Error('OAUTH_ACCOUNT');
+            }
+            // Invited by an admin but hasn't finished setting up the account
+            throw new Error('INVITE_PENDING');
+        }
+
         // Check password
         const isMatch = await bcrypt.compare(password, user.passwordHash);
         if (!isMatch) throw new Error('INVALID_CREDENTIALS');
@@ -94,7 +101,7 @@ class AuthService {
 
     async requestPasswordReset(email) {
         const user = await User.findOne({ where: { email } });
-        if (!user) return; // Silent return for security (don't reveal if email exists)
+        if (!user) return; 
 
         const resetToken = crypto.randomBytes(3).toString('hex').toUpperCase();
         const expireTime = new Date(Date.now() + 3600000); // 1 hour from now
@@ -112,16 +119,18 @@ class AuthService {
             where: {
                 email,
                 resetPasswordToken: resetToken,
-                resetPasswordExpiresAt: { [Op.gt]: new Date() } // Ensures it hasn't expired
+                resetPasswordExpiresAt: { [Op.gt]: new Date() }
             }
         });
 
         if (!user) throw new Error('INVALID_TOKEN');
 
-        // Password validation: new with current password
-        const isSamePassword = await bcrypt.compare(newPassword, user.passwordHash);
-        if (isSamePassword) {
-            throw new Error('SAME_PASSWORD');
+        // Only compare against the old password if one exists
+        if (user.passwordHash) {
+            const isSamePassword = await bcrypt.compare(newPassword, user.passwordHash);
+            if (isSamePassword) {
+                throw new Error('SAME_PASSWORD');
+            }
         }
 
         const salt = await bcrypt.genSalt(10);
@@ -153,7 +162,6 @@ class AuthService {
 
         const newOtp = crypto.randomInt(100000, 999999).toString();
         await user.update({ verificationToken: newOtp });
-        
         await sendVerificationEmail(email, newOtp);
     }
 
